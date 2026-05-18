@@ -1,0 +1,19 @@
+[Unit]
+Description=Stub for org.freedesktop.host.portal.Registry (GTK4 sandbox check)
+Before=huskyfe.service
+After=multi-user.target dbus.socket
+Requires=dbus.socket
+
+[Service]
+Type=simple
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+ExecStartPre=/bin/mkdir -p /run/user/0
+ExecStartPre=/bin/chmod 700 /run/user/0
+ExecStart=/usr/local/bin/host-portal-stub.py
+StandardOutput=append:/tmp/host-portal-stub.log
+StandardError=append:/tmp/host-portal-stub.log
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

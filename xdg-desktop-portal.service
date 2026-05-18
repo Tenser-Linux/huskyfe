@@ -1,0 +1,22 @@
+[Unit]
+Description=xdg-desktop-portal (preloaded for huskyfe)
+Before=huskyfe.service
+After=multi-user.target dbus.socket host-portal-stub.service
+Requires=dbus.socket
+
+[Service]
+Type=simple
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+Environment=XDG_RUNTIME_DIR=/run/user/0
+Environment=XDG_CURRENT_DESKTOP=wlroots
+Environment=XDG_SESSION_TYPE=wayland
+ExecStartPre=/bin/mkdir -p /run/user/0
+ExecStartPre=/bin/chmod 700 /run/user/0
+ExecStart=/usr/libexec/xdg-desktop-portal
+StandardOutput=append:/tmp/xdg-desktop-portal.log
+StandardError=append:/tmp/xdg-desktop-portal.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

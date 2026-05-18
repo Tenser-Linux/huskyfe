@@ -1,0 +1,31 @@
+[Unit]
+Description=Husky frontend (direct-DRM UI)
+After=halium-mounts.service systemd-user-sessions.service multi-user.target
+Wants=halium-mounts.service
+Conflicts=phosh.service phoc.service getty@tty1.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=10s
+Environment=XDG_RUNTIME_DIR=/run/user/0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+ExecStartPre=-/usr/bin/pkill -9 -f "wcomp|cage|phoc|phosh|weston|modetest"
+ExecStartPre=/bin/sleep 1
+ExecStartPre=/bin/sh -c 'mkdir -p /run/user/0; if ! [ -S /run/user/0/bus ]; then dbus-daemon --session --address=unix:path=/run/user/0/bus --nofork --print-address >/tmp/huskyfe-dbus.log 2>&1 & sleep 0.5; fi'
+ExecStartPre=/bin/sh -c 'pgrep -f glproxy-srv >/dev/null || (chroot /var/lib/machines/halium /usr/local/bin/glproxy-srv > /tmp/glp.log 2>&1 &) ; sleep 1'
+
+ExecStart=/root/huskyfe/huskyfe
+StandardOutput=append:/tmp/huskyfe.log
+StandardError=append:/tmp/huskyfe.log
+
+Restart=always
+RestartSec=2
+StartLimitBurst=10
+StartLimitIntervalSec=60
+
+KillMode=mixed
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
