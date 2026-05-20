@@ -1,9 +1,14 @@
 #include "Wifi.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include <algorithm>
 
 namespace huskyfe::wifi {
@@ -194,6 +199,78 @@ bool connect_new(const std::string& ssid, const std::string& psk) {
 
 void disconnect() {
     run_cmd("wpa_cli -i wlan0 disconnect >/dev/null 2>&1");
+}
+
+
+namespace {
+
+std::thread             g_auto_thread;
+std::atomic<bool>       g_auto_stop{false};
+std::mutex              g_auto_mu;
+std::condition_variable g_auto_cv;
+
+std::vector<std::pair<int, std::string>> known_networks() {
+    std::vector<std::pair<int, std::string>> out;
+    std::string s = run_cmd("wpa_cli -i wlan0 list_networks 2>/dev/null");
+    std::istringstream ss(s);
+    std::string line;
+    bool first = true;
+    while (std::getline(ss, line)) {
+        if (first) { first = false; continue; }
+        if (line.empty()) continue;
+        auto cols = tabsplit(line);
+        if (cols.size() < 2) continue;
+        if (cols.size() >= 4 && cols[3].find("DISABLED") != std::string::npos) continue;
+        out.emplace_back(atoi(cols[0].c_str()), cols[1]);
+    }
+    return out;
+}
+
+void auto_thread_main() {
+    using namespace std::chrono_literals;
+    while (!g_auto_stop.load()) {
+        Status st = status();
+        if (!st.connected) {
+            auto known = known_networks();
+            if (!known.empty()) {
+                run_cmd("wpa_cli -i wlan0 scan >/dev/null 2>&1");
+                {
+                    std::unique_lock<std::mutex> lk(g_auto_mu);
+                    g_auto_cv.wait_for(lk, 2s, []{ return g_auto_stop.load(); });
+                }
+                if (g_auto_stop.load()) break;
+
+                auto seen = scan_results();
+                for (auto& [id, ssid] : known) {
+                    bool in_range = false;
+                    for (auto& n : seen) if (n.ssid == ssid) { in_range = true; break; }
+                    if (!in_range) continue;
+                    char cmd[128];
+                    snprintf(cmd, sizeof(cmd),
+                             "wpa_cli -i wlan0 select_network %d >/dev/null 2>&1", id);
+                    run_cmd(cmd);
+                    break;
+                }
+            }
+        }
+        std::unique_lock<std::mutex> lk(g_auto_mu);
+        g_auto_cv.wait_for(lk, 5s, []{ return g_auto_stop.load(); });
+    }
+}
+
+}  // namespace
+
+void start_auto_connect() {
+    if (g_auto_thread.joinable()) return;
+    g_auto_stop.store(false);
+    g_auto_thread = std::thread(auto_thread_main);
+}
+
+void stop_auto_connect() {
+    if (!g_auto_thread.joinable()) return;
+    g_auto_stop.store(true);
+    g_auto_cv.notify_all();
+    g_auto_thread.join();
 }
 
 }

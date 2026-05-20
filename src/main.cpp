@@ -1411,6 +1411,7 @@ int main() {
 
 
     huskyfe::notifications::init((int)mode.hdisplay, (int)mode.vdisplay);
+    huskyfe::wifi::start_auto_connect();
 
 
     std::string keyboard_owner;
@@ -4884,6 +4885,7 @@ void main() {
     set_cpu_governor("schedutil");
     set_perf_mon(1);
     huskyfe::wlhost::shutdown();
+    huskyfe::wifi::stop_auto_connect();
     about_quit.store(true, std::memory_order_relaxed);
     if (about_worker.joinable()) about_worker.join();
 

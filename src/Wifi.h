@@ -28,4 +28,8 @@ bool   connect_saved(const std::string& ssid);
 bool   connect_new(const std::string& ssid, const std::string& psk);
 void   disconnect();
 
+
+void   start_auto_connect();
+void   stop_auto_connect();
+
 }

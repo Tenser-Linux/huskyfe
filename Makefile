@@ -17,7 +17,8 @@ PKG_LIBS   := $(shell pkg-config --libs   $(PKGS) 2>/dev/null)
 INCS     := -I/usr/include/libdrm -Isrc/protocol $(PKG_CFLAGS)
 CXXFLAGS := -O2 -g -std=c++20 -Wall -Wextra -pthread $(INCS)
 CFLAGS   := -O2 -g -Wall -Wextra $(INCS)
-LDFLAGS  := -rdynamic -lGLESv2 -lEGL -ldrm $(PKG_LIBS)
+GLPROXY_LIB ?= /usr/local/lib/glproxy
+LDFLAGS  := -L$(GLPROXY_LIB) -Wl,-rpath,$(GLPROXY_LIB) -rdynamic -lGLESv2 -lEGL -ldrm $(PKG_LIBS)
 
 # Generated wayland-protocol files.
 GEN_HDR := src/protocol/xdg-shell-server-protocol.h \
