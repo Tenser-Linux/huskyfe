@@ -89,6 +89,8 @@ static int64_t now_unix_ms() {
 
 State g;
 
+TapHandler g_tap_handler;
+
 
 const char* INTROSPECT_XML =
 "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
@@ -844,10 +846,37 @@ bool on_touch_up(int x, int y) {
     float yT = t.y_anim.value - slide_off;
     float yB = yT + TOAST_H_PX;
     if ((float)x >= xL && (float)x <= xR && (float)y >= yT && (float)y <= yB) {
+        uint32_t    tap_id   = t.id;
+        std::string tap_app  = t.app_name;
         close_active((size_t)idx, REASON_DISMISSED);
+        if (g_tap_handler) g_tap_handler(tap_id, tap_app);
         return true;
     }
     return false;
+}
+
+void set_tap_handler(TapHandler h) {
+    g_tap_handler = std::move(h);
+}
+
+uint32_t post_local(const std::string& app_name,
+                    const std::string& summary,
+                    const std::string& body,
+                    int32_t            expire_ms) {
+    std::lock_guard<std::mutex> lk(g.mu);
+    State::Incoming in{};
+    in.is_close = false;
+    in.is_replacement = false;
+    in.t.id        = g.next_id_main++;
+    in.t.app_name  = app_name;
+    in.t.summary   = summary;
+    in.t.body      = body;
+    in.t.urgency   = 1;
+    in.t.lifetime_s = (expire_ms > 0) ? (expire_ms / 1000.0f)
+                                       : (DEFAULT_TIMEOUT_MS / 1000.0f);
+    uint32_t id = in.t.id;
+    g.inbox.push_back(std::move(in));
+    return id;
 }
 
 }

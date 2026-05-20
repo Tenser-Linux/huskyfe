@@ -44,6 +44,7 @@
 #include "Text.h"
 #include "WaylandHost.h"
 #include "Wifi.h"
+#include "Updater.h"
 #include "Haptics.h"
 #include "Flashlight.h"
 #include "Camera.h"
@@ -1411,7 +1412,9 @@ int main() {
 
 
     huskyfe::notifications::init((int)mode.hdisplay, (int)mode.vdisplay);
+    huskyfe::notifications::set_tap_handler(&huskyfe::updater::on_notification_tap);
     huskyfe::wifi::start_auto_connect();
+    huskyfe::updater::start();
 
 
     std::string keyboard_owner;
@@ -4885,6 +4888,7 @@ void main() {
     set_cpu_governor("schedutil");
     set_perf_mon(1);
     huskyfe::wlhost::shutdown();
+    huskyfe::updater::stop();
     huskyfe::wifi::stop_auto_connect();
     about_quit.store(true, std::memory_order_relaxed);
     if (about_worker.joinable()) about_worker.join();

@@ -20,6 +20,9 @@ CFLAGS   := -O2 -g -Wall -Wextra $(INCS)
 GLPROXY_LIB ?= /usr/local/lib/glproxy
 LDFLAGS  := -L$(GLPROXY_LIB) -Wl,-rpath,$(GLPROXY_LIB) -rdynamic -lGLESv2 -lEGL -ldrm $(PKG_LIBS)
 
+GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || cat src/version.txt 2>/dev/null || echo unknown)
+CXXFLAGS += -DHUSKYFE_GIT_SHA=\"$(GIT_SHA)\"
+
 # Generated wayland-protocol files.
 GEN_HDR := src/protocol/xdg-shell-server-protocol.h \
            src/protocol/linux-dmabuf-unstable-v1-server-protocol.h \
@@ -34,7 +37,7 @@ CPP_SRCS := src/main.cpp src/Input.cpp src/Status.cpp src/Apps.cpp \
             src/Icons.cpp src/Background.cpp \
             src/Wifi.cpp src/Bluetooth.cpp src/Keyboard.cpp src/Blur.cpp \
             src/WaylandHost.cpp src/Notifications.cpp src/Haptics.cpp \
-            src/Flashlight.cpp src/Camera.cpp \
+            src/Flashlight.cpp src/Camera.cpp src/Updater.cpp \
             src/GL.cpp src/Renderer.cpp src/ImageRenderer.cpp src/Text.cpp
 C_SRCS   := $(GEN_SRC)
 

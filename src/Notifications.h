@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -55,5 +56,14 @@ void clear_low();
 
 
 void clear_all();
+
+
+uint32_t post_local(const std::string& app_name,
+                    const std::string& summary,
+                    const std::string& body,
+                    int32_t            expire_ms = -1);
+
+using TapHandler = std::function<void(uint32_t id, const std::string& app_name)>;
+void set_tap_handler(TapHandler h);
 
 }

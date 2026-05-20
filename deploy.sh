@@ -24,7 +24,8 @@ ssh_run()  { ssh $SSH_OPTS "$PHONE" "$@"; }
 scp_send() { scp $SSH_OPTS -r "$@" "$PHONE:$REMOTE/"; }
 
 cmd_push() {
-    echo ">> pushing src/ Makefile deploy.sh to $PHONE:$REMOTE/"
+    git -C "$HERE" rev-parse HEAD 2>/dev/null > "$HERE/src/version.txt" || echo unknown > "$HERE/src/version.txt"
+    echo ">> pushing src/ Makefile deploy.sh to $PHONE:$REMOTE/  (sha $(cat "$HERE/src/version.txt"))"
     ssh_run "mkdir -p '$REMOTE'"
     scp_send "$HERE/src" "$HERE/Makefile" "$HERE/deploy.sh"
 }
