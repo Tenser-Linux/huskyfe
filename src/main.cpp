@@ -122,7 +122,6 @@ static void launch_app(const std::string& exec) {
         for (auto& s : toks) argv.push_back(s.data());
         argv.push_back(nullptr);
 
-
         {
             std::string base = toks[0];
             if (auto sl = base.rfind('/'); sl != std::string::npos)
@@ -131,13 +130,17 @@ static void launch_app(const std::string& exec) {
             std::string path = "/tmp/huskyfe-app-" + base + ".log";
             int lf = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
                           0644);
-            if (lf >= 0) {
-                dup2(lf, 1);
-                dup2(lf, 2);
-                close(lf);
-            }
+            if (lf >= 0) { dup2(lf, 1); dup2(lf, 2); close(lf); }
         }
 
+        // huskyfe runs with LD_LIBRARY_PATH=/usr/local/lib/glproxy:...vkproxy so
+        // ITS GL/Vulkan go through the proxy libs. A GUI child must NOT inherit
+        // that: it would load glproxy's compositor-only libEGL instead of the
+        // system Mesa GL and hang forever during GL init, never mapping a window
+        // (tile-launched apps presented nothing; the same binary from a clean
+        // shell -- without this env -- always worked).
+        unsetenv("LD_LIBRARY_PATH");
+        unsetenv("LD_PRELOAD");
 
         setenv("XDG_RUNTIME_DIR", "/run/user/0", 1);
         setenv("WAYLAND_DISPLAY", "wayland-1",   1);
@@ -145,15 +148,16 @@ static void launch_app(const std::string& exec) {
                "unix:path=/run/user/0/bus", 1);
 
         setenv("GDK_BACKEND",  "wayland", 1);
+        // GTK4 Vulkan renderer (GSK) corrupts under scroll on the Mali/vkproxy
+        // path; the GL renderer is solid here.
+        setenv("GSK_RENDERER", "gl", 1);
         setenv("QT_QPA_PLATFORM", "wayland", 1);
         setenv("MOZ_ENABLE_WAYLAND", "1", 1);
-
 
         setenv("GTK_USE_PORTAL",       "0", 1);
         setenv("GTK_A11Y",              "none", 1);
         setenv("NO_AT_BRIDGE",          "1", 1);
         setenv("GIO_USE_VFS",           "local", 1);
-
 
         setenv("QT_ACCESSIBILITY",      "0", 1);
         fprintf(stderr, "=== huskyfe-app launched: %s ===\n", argv[0]);
@@ -161,7 +165,6 @@ static void launch_app(const std::string& exec) {
         perror("execvp");
         _exit(127);
     }
-
     int status = 0;
     waitpid(p, &status, 0);
 }
@@ -860,9 +863,20 @@ int main() {
         if (auto sl = k.rfind('/'); sl != std::string::npos) k = k.substr(sl + 1);
         return normalize_id(k);
     };
-    auto find_running_for_cell = [&](const std::string& exec)
-                                     -> huskyfe::wlhost::AppHandle {
-        std::string key = derive_app_key(exec);
+    // Derive a match key from the .desktop file basename (e.g.
+    // org.gtk.Demo4.desktop -> orggtkdemo4). By freedesktop convention this
+    // equals the app's Wayland app_id, so it matches reliably -- unlike the
+    // Exec= binary name (gtk4-demo), which only coincidentally substring-matches
+    // the app_id for some apps (e.g. konsole) and fails for most GTK apps,
+    // causing huskyfe to relaunch an already-running app instead of refocusing.
+    auto derive_desktop_key = [&](const std::string& desktop_path) -> std::string {
+        std::string b = desktop_path;
+        if (auto sl = b.rfind('/'); sl != std::string::npos) b = b.substr(sl + 1);
+        if (b.size() > 8 && b.substr(b.size() - 8) == ".desktop")
+            b = b.substr(0, b.size() - 8);
+        return normalize_id(b);
+    };
+    auto match_running = [&](const std::string& key) -> huskyfe::wlhost::AppHandle {
         if (key.empty()) return 0;
         for (const auto& r : huskyfe::wlhost::running()) {
             std::string id = normalize_id(r.app_id);
@@ -872,6 +886,16 @@ int main() {
                 return r.handle;
         }
         return 0;
+    };
+    auto find_running_for_app = [&](const huskyfe::apps::AppEntry& a)
+                                     -> huskyfe::wlhost::AppHandle {
+        // Prefer the desktop-id key (matches app_id reliably); fall back to exec.
+        if (auto h = match_running(derive_desktop_key(a.desktop_path))) return h;
+        return match_running(derive_app_key(a.exec));
+    };
+    auto find_running_for_cell = [&](const std::string& exec)
+                                     -> huskyfe::wlhost::AppHandle {
+        return match_running(derive_app_key(exec));
     };
 
 
@@ -2130,7 +2154,7 @@ int main() {
             renderer.begin_pass();
             for (int i = 0; i < active_cells; i++) {
                 if (i == 0) continue;
-                if (!find_running_for_cell(installed[i].exec)) continue;
+                if (!find_running_for_app(installed[i])) continue;
                 const CellRect& c = cells[i];
                 constexpr float dot_d = 24.0f;
                 const float dx = c.x + c.w - dot_d - 8.0f;
@@ -2171,7 +2195,7 @@ int main() {
                                         24.0f);
 
             bool running_now = (ctx_menu_cell > 0)
-                && find_running_for_cell(installed[ctx_menu_cell].exec) != 0;
+                && find_running_for_app(installed[ctx_menu_cell]) != 0;
             float close_alpha = running_now ? 1.0f : 0.4f;
             huskyfe::Color btn1_top = { 0.55f, 0.18f, 0.18f, opacity * close_alpha };
             huskyfe::Color btn1_bot = { 0.30f, 0.10f, 0.10f, opacity * close_alpha };
@@ -4791,7 +4815,7 @@ void main() {
 
                                 if (ctx_menu_cell > 0
                                     && ctx_menu_cell < (int)installed.size()) {
-                                    auto h = find_running_for_cell(installed[ctx_menu_cell].exec);
+                                    auto h = find_running_for_app(installed[ctx_menu_cell]);
                                     if (h) {
                                         fprintf(stderr, "huskyfe: closing '%s' via ctx menu\n",
                                                 installed[ctx_menu_cell].name.c_str());
@@ -4857,7 +4881,7 @@ void main() {
                                 open_settings();
                             } else if (idx_up < (int)installed.size()) {
                                 const auto& a = installed[idx_up];
-                                auto existing = find_running_for_cell(a.exec);
+                                auto existing = find_running_for_app(a);
                                 if (existing) {
                                     fprintf(stderr, "huskyfe: refocusing '%s' (already running)\n",
                                             a.name.c_str());
