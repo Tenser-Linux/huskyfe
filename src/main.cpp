@@ -88,8 +88,22 @@ static void sd_notify(const char* state) {
 }
 
 
+// --- app-list change detection: self-reload so newly installed apps appear ---
+static std::string huskyfe_apps_signature() {
+    auto v = huskyfe::apps::scan(0);
+    std::string sig;
+    sig.reserve(v.size() * 40);
+    for (const auto& a : v) { sig += a.desktop_path; sig.push_back(0x0a); }
+    return sig;
+}
+static std::string g_apps_sig;
+// Set whenever we spawn an app; suppresses self-reload during the launch
+// transition (tile tap -> surface map) so a reload never races a launch.
+static std::chrono::steady_clock::time_point g_last_launch{};
+
 static void launch_app(const std::string& exec) {
     if (exec.empty()) return;
+    g_last_launch = std::chrono::steady_clock::now();
     pid_t p = fork();
     if (p < 0) { perror("fork"); return; }
     if (p == 0) {
@@ -161,6 +175,7 @@ bool g_blanked = false;
 huskyfe::Spring g_fade;
 bool g_fading_out = false;
 bool g_fading_in  = false;
+bool g_reload_pending = false;  // app-list changed: fade out, then re-exec
 void on_sigint(int) { g_quit = 1; }
 
 struct Dmabuf {
@@ -513,6 +528,7 @@ int main() {
         installed.insert(installed.begin(), std::move(settings));
     }
     fprintf(stderr, "huskyfe: scanned %zu app(s) for grid (incl. Settings)\n", installed.size());
+    g_apps_sig = huskyfe_apps_signature();
 
 
     huskyfe::icons::Atlas icon_atlas;
@@ -810,7 +826,16 @@ int main() {
     bool   quick_open = false;
     huskyfe::Spring quick_anim;
     quick_anim.snap_to(0.0f);
-    g_fade.snap_to(0.0f);
+    if (getenv("HUSKYFE_RELOAD")) {
+        unsetenv("HUSKYFE_RELOAD");
+        g_fade.snap_to(1.0f);   // start fully black
+        g_fading_in = true;     // then animate up to reveal the refreshed grid
+        g_fade.stiffness = 24.0f;
+        g_fade.damping = 10.0f;
+        g_fade.set(0.0f);
+    } else {
+        g_fade.snap_to(0.0f);
+    }
     bool   dragging_quick_brightness = false;
     int    quick_pressed = -1;
 
@@ -1355,6 +1380,28 @@ int main() {
             }
         }
         auto tnow = std::chrono::steady_clock::now();
+        // Self-reload when the installed-app set changes (new .desktop appears).
+        {
+            static std::chrono::steady_clock::time_point last_apps_check =
+                std::chrono::steady_clock::now();
+            if (view == View::LAUNCHER
+                && !huskyfe::wlhost::has_active_surface()
+                && (tnow - g_last_launch) >= std::chrono::seconds(5)
+                && (tnow - last_apps_check) >= std::chrono::seconds(3)) {
+                last_apps_check = tnow;
+                std::string cur = huskyfe_apps_signature();
+                if (!g_apps_sig.empty() && cur != g_apps_sig && !g_reload_pending) {
+                    fprintf(stderr, "huskyfe: app list changed -> fade + self-reload\n");
+                    g_apps_sig = cur;
+                    g_reload_pending = true;
+                    g_fading_in = false;
+                    g_fading_out = true;
+                    g_fade.stiffness = 24.0f;
+                    g_fade.damping = 10.0f;
+                    g_fade.set(1.0f);
+                }
+            }
+        }
         if (!bt_connecting_mac.empty()) {
 
             bool linked = false;
@@ -1750,6 +1797,12 @@ int main() {
             page_anim.tick(FIXED_DT);
             huskyfe::notifications::tick(FIXED_DT);
             anim_accum -= FIXED_DT;
+        }
+        if (g_fading_out && g_fade.settled() && g_reload_pending) {
+            setenv("HUSKYFE_RELOAD", "1", 1);
+            execl("/proc/self/exe", "/proc/self/exe", (char*)nullptr);
+            perror("huskyfe: self-reload execl");
+            g_reload_pending = false;
         }
         if (g_fading_out && g_fade.settled()) {
             g_fading_out = false;
